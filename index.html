@@ -95,6 +95,7 @@
             padding-bottom: env(safe-area-inset-bottom, 10px);
             padding-top: 10px;
             z-index: 40;
+            position: relative;
         }
 
         .btn-control {
@@ -129,6 +130,19 @@
             height: 16px;
             animation: spin 1s linear infinite;
             display: inline-block;
+        }
+
+        /* НОМЕР ВЕРСИИ - Сделан ярким и заметным */
+        #version-tag {
+            position: absolute;
+            bottom: 5px;
+            right: 8px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.9); /* Почти белый, чтобы было видно */
+            text-shadow: 1px 1px 2px #000000; /* Тень для читаемости */
+            pointer-events: none;
+            font-family: 'Press Start 2P', cursive; /* Пиксельный шрифт */
+            z-index: 100;
         }
     </style>
 </head>
@@ -204,6 +218,8 @@
                 <button class="btn-control btn-bomb w-20 h-20 shadow-xl" data-key="Space">💣</button>
             </div>
         </div>
+        <!-- ЯВНЫЙ НОМЕР ВЕРСИИ -->
+        <div id="version-tag">v1.3</div>
     </footer>
 
     <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 bg-slate-800 border border-yellow-500 text-yellow-100 px-4 py-2 rounded-lg shadow-2xl opacity-0 pointer-events-none text-xs sm:text-sm text-center w-max max-w-[90%]">
@@ -220,6 +236,7 @@
         const GRID_SIZE = 13;
         const SOFT_WALL_DENSITY = 0.45;
         const PLAYER_SPEED_MS = 160; 
+        const apiKey = ""; // API Key injected by environment
         
         /* --- ASSETS (Default) --- */
         let SPRITES = {
@@ -292,7 +309,7 @@
             spawnEnemies(Math.min(gameState.level + 1, 8));
             
             // AI: Generate Name automatically
-            generateLevelName();
+            generateLevelBriefing();
 
             gameLoopId = setInterval(gameTick, 50);
             requestAnimationFrame(renderLoop);
@@ -409,7 +426,7 @@
             placeItem(SPRITES.DOOR);
             placeItem(SPRITES.KEY);
             placeItem(SPRITES.RANGE_UP);
-            placeItem(SPRITES.EXTRA_BOMB); // Добавили бомбу
+            placeItem(SPRITES.EXTRA_BOMB); 
             if (Math.random() > 0.5) placeItem(SPRITES.EXTRA_LIFE);
 
             // DOM Init
@@ -467,7 +484,7 @@
                 showToast("❤️ Жизнь++"); 
             }
             else if (tile === SPRITES.EXTRA_BOMB) { 
-                gameState.player.maxBombs++; // Увеличиваем лимит
+                gameState.player.maxBombs++; 
                 board[ny][nx] = SPRITES.EMPTY; 
                 showToast("🧨 Бомб++"); 
             }
@@ -487,7 +504,6 @@
                 const validMoves = dirs.filter(d => {
                     const tx = enemy.x + d.x, ty = enemy.y + d.y;
                     const tTile = board[ty][tx];
-                    // Враги могут ходить по бонусам, включая бомбы
                     const passable = tTile === SPRITES.EMPTY || tTile === SPRITES.KEY || tTile === SPRITES.RANGE_UP || tTile === SPRITES.EXTRA_LIFE || tTile === SPRITES.EXTRA_BOMB;
                     const tBomb = gameState.bombs.find(b => b.x === tx && b.y === ty);
                     return passable && !tBomb;
@@ -501,9 +517,7 @@
         }
 
         function placeBomb() {
-            // Проверяем лимит бомб
             if (gameState.player.activeBombs >= gameState.player.maxBombs) return;
-            // Не ставим бомбу на другую бомбу
             if (gameState.bombs.some(b => b.x === gameState.player.x && b.y === gameState.player.y)) return;
             
             const bomb = { x: gameState.player.x, y: gameState.player.y, range: gameState.player.range };
@@ -568,17 +582,33 @@
         }
 
         /* --- UI & GEMINI API --- */
-        const apiKey = ""; // Environment injected
 
-        async function generateLevelName() {
+        // Helper: Serialize board for AI
+        function getBoardString() {
+            let s = "";
+            for(let y=0; y<GRID_SIZE; y++) {
+                for(let x=0; x<GRID_SIZE; x++) {
+                    if (gameState.player.x === x && gameState.player.y === y) s += "P";
+                    else if (gameState.enemies.some(e => e.x === x && e.y === y)) s += "E";
+                    else if (board[y][x] === SPRITES.HARD_WALL) s += "#";
+                    else if (board[y][x] === SPRITES.SOFT_WALL) s += "W"; // Wall destructible
+                    else s += ".";
+                }
+                s += "\n";
+            }
+            return s;
+        }
+
+        async function generateLevelBriefing() {
+            // Don't block game start, just update toast
             try {
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ contents: [{ parts: [{ text: `Придумай название уровня подземелья для игры. 2-3 слова на русском. Эпично или смешно.` }] }] })
+                    body: JSON.stringify({ contents: [{ parts: [{ text: `Придумай название уровня подземелья ${gameState.level} и короткую миссию (1 предложение) для Бомбермена. Ответ в формате: "Название: Миссия".` }] }] })
                 });
                 const d = await res.json();
                 const text = d.candidates?.[0]?.content?.parts?.[0]?.text || `Уровень ${gameState.level}`;
-                showToast(`🏰 ${text}`);
+                showToast(`📜 ${text}`);
             } catch(e) {}
         }
 
@@ -597,7 +627,7 @@
 
         async function generateTheme() {
             showToast("🎨 Генерирую тему...");
-            const prompt = `JSON для игры. Keys: EMPTY, HARD_WALL, SOFT_WALL, PLAYER, ENEMY, BOMB, RANGE_UP, EXTRA_LIFE, KEY, DOOR, DEAD. Values: 1 emoji each. Theme: Random (Candy, Horror, Space, Underwater). Only JSON.`;
+            const prompt = `JSON для игры. Keys: EMPTY, HARD_WALL, SOFT_WALL, PLAYER, ENEMY, BOMB, RANGE_UP, EXTRA_LIFE, KEY, DOOR, DEAD, EXTRA_BOMB. Values: 1 emoji each. Theme: Random (Candy, Horror, Space, Underwater, Matrix, Food). Only JSON.`;
             try {
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -630,6 +660,25 @@
                     throw new Error("Invalid format");
                 }
             } catch(e) { showToast("ИИ ошибся, строю обычную..."); generateMap(); }
+        }
+        
+        async function getContextualAdvice() {
+            showToast("🧠 Анализирую ситуацию...");
+            const gridStr = getBoardString();
+            const prompt = `You are a tactical advisor for Bomberman. Here is the current 13x13 grid:\n${gridStr}\nLegend: P=Player, E=Enemy, #=Hard Wall, W=Soft Wall, .=Empty.\nGive 1 short sentence of advice (in Russian) to the player based on their immediate surroundings (enemies nearby? trapped?). Keep it urgent.`;
+            
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const d = await res.json();
+                const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) showToast("💡 " + text);
+                else showToast("💡 Беги!");
+            } catch(e) {
+                showToast("💡 Ошибка связи с штабом");
+            }
         }
 
         function showLevelComplete() {
@@ -712,7 +761,6 @@
             levelEl.textContent = gameState.level;
             livesEl.textContent = gameState.player.lives;
             keyEl.textContent = gameState.player.hasKey ? "✅" : "❌";
-            // Показываем макс. кол-во бомб
             if (bombsEl) bombsEl.textContent = gameState.player.maxBombs;
         }
 
@@ -720,7 +768,7 @@
             const t = document.getElementById('toast');
             document.getElementById('toast-msg').textContent = msg;
             t.classList.remove('opacity-0', 'pointer-events-none');
-            setTimeout(() => t.classList.add('opacity-0', 'pointer-events-none'), 2000);
+            setTimeout(() => t.classList.add('opacity-0', 'pointer-events-none'), 3000);
         }
 
         // Listeners
@@ -747,18 +795,8 @@
             if(m[e.key]) setInput(m[e.key], false);
         });
 
-        document.getElementById('ai-btn').addEventListener('click', async () => {
-            showToast("🤖...");
-            try {
-                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ contents: [{ parts: [{ text: `Совет Бомбермен. Ур: ${gameState.level}. 1 фраза рус.` }] }] })
-                });
-                const d = await res.json();
-                showToast("🤖 " + (d.candidates?.[0]?.content?.parts?.[0]?.text || "Беги!"));
-            } catch(e) {}
-        });
-
+        // Updated Listeners for AI buttons
+        document.getElementById('ai-btn').addEventListener('click', getContextualAdvice);
         document.getElementById('ai-theme-btn').addEventListener('click', generateTheme);
         document.getElementById('ai-map-btn').addEventListener('click', generateAIMap);
 
