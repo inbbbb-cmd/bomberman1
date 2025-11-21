@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Бомбермен: AI Архитектор</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto:wght@700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -148,6 +149,10 @@
                 <span class="text-gray-400 uppercase">KEY</span>
                 <span id="key-el" class="pixel-font text-gray-500">❌</span>
             </div>
+            <div class="flex flex-col">
+                <span class="text-gray-400 uppercase">BOMB</span>
+                <span id="bombs-el" class="pixel-font text-yellow-400">1</span>
+            </div>
         </div>
         <div class="flex gap-1 overflow-x-auto">
             <button id="ai-map-btn" class="bg-emerald-600 px-2 py-1 rounded font-bold text-[10px] shadow-lg active:scale-95 transition whitespace-nowrap flex items-center gap-1">
@@ -206,6 +211,11 @@
     </div>
 
     <script>
+        // --- TELEGRAM INIT ---
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
         /* --- CONSTANTS --- */
         const GRID_SIZE = 13;
         const SOFT_WALL_DENSITY = 0.45;
@@ -214,7 +224,7 @@
         /* --- ASSETS (Default) --- */
         let SPRITES = {
             EMPTY: '', HARD_WALL: '🧱', SOFT_WALL: '🌲', PLAYER: '😎',
-            ENEMY: '👻', BOMB: '💣', RANGE_UP: '⚡', EXTRA_LIFE: '❤️',
+            ENEMY: '👻', BOMB: '💣', RANGE_UP: '⚡', EXTRA_LIFE: '❤️', EXTRA_BOMB: '🧨',
             KEY: '🔑', DOOR: '🚪', DEAD: '💀'
         };
 
@@ -241,6 +251,7 @@
         const levelEl = document.getElementById('level-el');
         const livesEl = document.getElementById('lives-el');
         const keyEl = document.getElementById('key-el');
+        const bombsEl = document.getElementById('bombs-el');
         const overlay = document.getElementById('overlay');
         const overlayTitle = document.getElementById('overlay-title');
         const overlayMsg = document.getElementById('overlay-msg');
@@ -388,8 +399,6 @@
 
             // Place Items
             softWallCoords.sort(() => Math.random() - 0.5);
-            const place = (item) => { if(softWallCoords.length > 0) hiddenItems[softWallCoords.pop().y][softWallCoords.pop().x] = item; }; // Simplified pop usage logic might be buggy if same obj used, assuming coords are unique objects. 
-            // Actually correct: pop returns {x,y}, access hiddenItems.
             const placeItem = (item) => {
                 if (softWallCoords.length > 0) {
                     const p = softWallCoords.pop();
@@ -400,6 +409,7 @@
             placeItem(SPRITES.DOOR);
             placeItem(SPRITES.KEY);
             placeItem(SPRITES.RANGE_UP);
+            placeItem(SPRITES.EXTRA_BOMB); // Добавили бомбу
             if (Math.random() > 0.5) placeItem(SPRITES.EXTRA_LIFE);
 
             // DOM Init
@@ -446,10 +456,28 @@
             gameState.player.x = nx;
             gameState.player.y = ny;
 
-            if (tile === SPRITES.RANGE_UP) { gameState.player.range++; board[ny][nx] = SPRITES.EMPTY; showToast("⚡ Радиус++"); }
-            else if (tile === SPRITES.EXTRA_LIFE) { gameState.player.lives++; board[ny][nx] = SPRITES.EMPTY; showToast("❤️ Жизнь++"); }
-            else if (tile === SPRITES.KEY) { gameState.player.hasKey = true; board[ny][nx] = SPRITES.EMPTY; showToast("🔑 Ключ!"); }
+            if (tile === SPRITES.RANGE_UP) { 
+                gameState.player.range++; 
+                board[ny][nx] = SPRITES.EMPTY; 
+                showToast("⚡ Радиус++"); 
+            }
+            else if (tile === SPRITES.EXTRA_LIFE) { 
+                gameState.player.lives++; 
+                board[ny][nx] = SPRITES.EMPTY; 
+                showToast("❤️ Жизнь++"); 
+            }
+            else if (tile === SPRITES.EXTRA_BOMB) { 
+                gameState.player.maxBombs++; // Увеличиваем лимит
+                board[ny][nx] = SPRITES.EMPTY; 
+                showToast("🧨 Бомб++"); 
+            }
+            else if (tile === SPRITES.KEY) { 
+                gameState.player.hasKey = true; 
+                board[ny][nx] = SPRITES.EMPTY; 
+                showToast("🔑 Ключ!"); 
+            }
             else if (tile === SPRITES.DOOR) checkLevelComplete();
+            
             updateUI();
         }
 
@@ -459,7 +487,8 @@
                 const validMoves = dirs.filter(d => {
                     const tx = enemy.x + d.x, ty = enemy.y + d.y;
                     const tTile = board[ty][tx];
-                    const passable = tTile === SPRITES.EMPTY || tTile === SPRITES.KEY || tTile === SPRITES.RANGE_UP || tTile === SPRITES.EXTRA_LIFE;
+                    // Враги могут ходить по бонусам, включая бомбы
+                    const passable = tTile === SPRITES.EMPTY || tTile === SPRITES.KEY || tTile === SPRITES.RANGE_UP || tTile === SPRITES.EXTRA_LIFE || tTile === SPRITES.EXTRA_BOMB;
                     const tBomb = gameState.bombs.find(b => b.x === tx && b.y === ty);
                     return passable && !tBomb;
                 });
@@ -472,7 +501,9 @@
         }
 
         function placeBomb() {
+            // Проверяем лимит бомб
             if (gameState.player.activeBombs >= gameState.player.maxBombs) return;
+            // Не ставим бомбу на другую бомбу
             if (gameState.bombs.some(b => b.x === gameState.player.x && b.y === gameState.player.y)) return;
             
             const bomb = { x: gameState.player.x, y: gameState.player.y, range: gameState.player.range };
@@ -537,7 +568,7 @@
         }
 
         /* --- UI & GEMINI API --- */
-        const apiKey = ""; // Key injected by environment
+        const apiKey = ""; // Environment injected
 
         async function generateLevelName() {
             try {
@@ -575,20 +606,7 @@
                 const d = await res.json();
                 let t = d.candidates?.[0]?.content?.parts?.[0]?.text.replace(/```json/g,'').replace(/```/g,'');
                 SPRITES = { ...SPRITES, ...JSON.parse(t) };
-                generateMap(); // Refresh visuals only? No, map logic relies on types, visuals rely on SPRITES. But hard walls might need refresh.
-                // Re-rendering board DOM is safer
-                boardEl.innerHTML = '';
-                // Re-render utilizing existing board state logic
-                board.forEach((row, y) => {
-                    row.forEach((c, x) => {
-                        const cell = document.createElement('div');
-                        cell.className = 'cell';
-                        cell.id = `c-${x}-${y}`;
-                        if (c === SPRITES.HARD_WALL) cell.style.backgroundColor = 'rgba(0,0,0,0.2)';
-                        else if (c === SPRITES.SOFT_WALL) cell.style.backgroundColor = 'rgba(0,0,0,0.1)';
-                        boardEl.appendChild(cell);
-                    });
-                });
+                generateMap(); 
                 showToast("Тема обновлена!");
             } catch(e) { showToast("Ошибка темы"); }
         }
@@ -603,11 +621,10 @@
                 });
                 const d = await res.json();
                 let text = d.candidates?.[0]?.content?.parts?.[0]?.text;
-                // Parse text into grid
                 const lines = text.trim().split('\n').filter(l => l.length >= 13).slice(0, 13);
                 if (lines.length === 13) {
                     generateMap(lines);
-                    spawnEnemies(5); // Respawn enemies on new map
+                    spawnEnemies(5); 
                     showToast("Карта построена!");
                 } else {
                     throw new Error("Invalid format");
@@ -629,6 +646,18 @@
 
         function showGameOver(win, cause) {
             gameState.isOver = true;
+            
+            // --- TELEGRAM SEND DATA ---
+            const user = tg.initDataUnsafe?.user;
+            const name = user ? user.first_name : "Player";
+            const data = JSON.stringify({ 
+                action: 'save_score', 
+                game: 'bomber', 
+                name: name, 
+                score: gameState.level 
+            });
+            tg.sendData(data);
+
             overlayTitle.textContent = "GAME OVER";
             overlayTitle.className = "pixel-font text-3xl text-red-500 mb-4";
             overlayMsg.textContent = `Уровень: ${gameState.level}`;
@@ -670,7 +699,8 @@
                     if(isPlayer) { content = gameState.player.lives>0 ? SPRITES.PLAYER : SPRITES.DEAD; className += ' player'; }
                     else if(enemy) { content = SPRITES.ENEMY; className += ' enemy'; }
                     else if(bomb) { content = SPRITES.BOMB; className += ' bomb'; }
-                    else if([SPRITES.KEY, SPRITES.DOOR, SPRITES.RANGE_UP, SPRITES.EXTRA_LIFE].includes(content)) className += ' item';
+                    // Обновили список предметов для отрисовки
+                    else if([SPRITES.KEY, SPRITES.DOOR, SPRITES.RANGE_UP, SPRITES.EXTRA_LIFE, SPRITES.EXTRA_BOMB].includes(content)) className += ' item';
 
                     if (cell.textContent !== content) cell.textContent = content;
                     if (cell.className !== className) cell.className = className;
@@ -682,6 +712,8 @@
             levelEl.textContent = gameState.level;
             livesEl.textContent = gameState.player.lives;
             keyEl.textContent = gameState.player.hasKey ? "✅" : "❌";
+            // Показываем макс. кол-во бомб
+            if (bombsEl) bombsEl.textContent = gameState.player.maxBombs;
         }
 
         function showToast(msg) {
