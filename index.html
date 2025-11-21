@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Бомбермен: AI Архитектор</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #1e293b;
+            --grid-color: #334155;
+        }
+        /* Блокировка жестов */
+        * {
+            touch-action: none !important;
+            -webkit-touch-callout: none !important;
+            -webkit-user-select: none !important;
+            user-select: none !important;
+            -webkit-tap-highlight-color: transparent !important;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--bg-color);
+            color: white;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100dvh;
+        }
+
+        .pixel-font { font-family: 'Press Start 2P', cursive; }
+
+        /* Main Layout */
+        main {
+            flex-grow: 1;
+            min-height: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            position: relative;
+        }
+
+        #game-container {
+            position: relative;
+            height: 100%; 
+            width: auto;
+            max-width: 100%;
+            aspect-ratio: 1 / 1;
+            background-color: var(--grid-color);
+            border: 4px solid #475569;
+            border-radius: 4px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            margin: auto;
+        }
+
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(13, 1fr);
+            grid-template-rows: repeat(13, 1fr);
+            width: 100%;
+            height: 100%;
+        }
+
+        .cell {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: clamp(10px, 4vmin, 24px); 
+            position: relative;
+        }
+
+        /* Entities */
+        .player { z-index: 30; transition: transform 0.1s linear; }
+        .enemy { z-index: 25; animation: bounce 1s infinite; }
+        .bomb { z-index: 20; animation: pulse 0.5s infinite alternate; }
+        .item { z-index: 10; }
+        
+        .danger-zone { background-color: rgba(239, 68, 68, 0.3) !important; }
+        .explosion { background-color: rgba(239, 68, 68, 0.9) !important; z-index: 28; }
+        .explosion::after { content: '💥'; font-size: 80%; }
+
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5%); } }
+        @keyframes pulse { from { transform: scale(0.9); } to { transform: scale(1.1); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Controls Footer */
+        #controls-area {
+            flex-shrink: 0;
+            background: rgba(15, 23, 42, 0.95);
+            border-top: 2px solid #334155;
+            padding-bottom: env(safe-area-inset-bottom, 10px);
+            padding-top: 10px;
+            z-index: 40;
+        }
+
+        .btn-control {
+            background: #3b82f6;
+            border-bottom: 4px solid #1d4ed8;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            cursor: pointer;
+        }
+        .btn-control.pressed { transform: translateY(4px); border-bottom: 0; background: #2563eb; }
+        
+        .btn-bomb { background: #ef4444; border-bottom: 4px solid #b91c1c; border-radius: 50%; font-size: 28px; }
+        .btn-bomb.pressed { background: #dc2626; }
+
+        /* Overlays */
+        .level-overlay {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+            padding: 20px;
+        }
+        #toast { z-index: 100; transition: opacity 0.3s; }
+        
+        .spinner {
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 2px solid #fff;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HEADER -->
+    <header class="flex-none flex justify-between items-center p-2 bg-slate-900 border-b border-slate-700 shadow-md z-30">
+        <div class="flex items-center gap-2 text-[10px] sm:text-xs">
+            <div class="flex flex-col">
+                <span class="text-gray-400 uppercase">LVL</span>
+                <span id="level-el" class="pixel-font text-purple-400">1</span>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-gray-400 uppercase">HP</span>
+                <span id="lives-el" class="pixel-font text-red-400">1</span>
+            </div>
+             <div class="flex flex-col">
+                <span class="text-gray-400 uppercase">KEY</span>
+                <span id="key-el" class="pixel-font text-gray-500">❌</span>
+            </div>
+        </div>
+        <div class="flex gap-1 overflow-x-auto">
+            <button id="ai-map-btn" class="bg-emerald-600 px-2 py-1 rounded font-bold text-[10px] shadow-lg active:scale-95 transition whitespace-nowrap flex items-center gap-1">
+                🏗️ Карта
+            </button>
+            <button id="ai-theme-btn" class="bg-pink-600 px-2 py-1 rounded font-bold text-[10px] shadow-lg active:scale-95 transition whitespace-nowrap flex items-center gap-1">
+                🎨 Тема
+            </button>
+            <button id="ai-btn" class="bg-indigo-600 px-2 py-1 rounded font-bold text-[10px] shadow-lg active:scale-95 transition whitespace-nowrap flex items-center gap-1">
+                ✨ Совет
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN -->
+    <main>
+        <div id="game-container">
+            <div id="game-board"></div>
+            
+            <!-- Overlays -->
+            <div id="overlay" class="level-overlay absolute inset-0 hidden flex-col items-center justify-center z-50 text-center">
+                <h1 id="overlay-title" class="pixel-font text-xl sm:text-3xl text-white mb-4"></h1>
+                <p id="overlay-msg" class="text-gray-300 mb-4 text-xs sm:text-base max-w-xs mx-auto"></p>
+                <div id="overlay-ai-comment" class="text-yellow-400 text-[10px] sm:text-xs italic mb-6 max-w-xs mx-auto min-h-[20px]"></div>
+                <button id="overlay-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-full text-sm sm:text-lg shadow-lg transform transition hover:scale-105">
+                    ДАЛЕЕ
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- CONTROLS -->
+    <footer id="controls-area">
+        <div class="max-w-md mx-auto px-4 flex justify-between items-end gap-2 h-[160px]">
+            <!-- D-PAD -->
+            <div class="grid grid-cols-3 gap-1 w-36 h-36 pb-2">
+                <div></div>
+                <button class="btn-control h-full w-full" data-key="ArrowUp">⬆️</button>
+                <div></div>
+                <button class="btn-control h-full w-full" data-key="ArrowLeft">⬅️</button>
+                <div class="flex items-center justify-center text-gray-600 opacity-30 text-xl">✚</div>
+                <button class="btn-control h-full w-full" data-key="ArrowRight">➡️</button>
+                <div></div>
+                <button class="btn-control h-full w-full" data-key="ArrowDown">⬇️</button>
+                <div></div>
+            </div>
+            <!-- ACTION -->
+            <div class="flex flex-col items-center gap-1 mb-4">
+                <button class="btn-control btn-bomb w-20 h-20 shadow-xl" data-key="Space">💣</button>
+            </div>
+        </div>
+    </footer>
+
+    <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 bg-slate-800 border border-yellow-500 text-yellow-100 px-4 py-2 rounded-lg shadow-2xl opacity-0 pointer-events-none text-xs sm:text-sm text-center w-max max-w-[90%]">
+        <span id="toast-msg"></span>
+    </div>
+
+    <script>
+        /* --- CONSTANTS --- */
+        const GRID_SIZE = 13;
+        const SOFT_WALL_DENSITY = 0.45;
+        const PLAYER_SPEED_MS = 160; 
+        
+        /* --- ASSETS (Default) --- */
+        let SPRITES = {
+            EMPTY: '', HARD_WALL: '🧱', SOFT_WALL: '🌲', PLAYER: '😎',
+            ENEMY: '👻', BOMB: '💣', RANGE_UP: '⚡', EXTRA_LIFE: '❤️',
+            KEY: '🔑', DOOR: '🚪', DEAD: '💀'
+        };
+
+        /* --- STATE --- */
+        let board = [];
+        let hiddenItems = [];
+        let gameState = {
+            level: 1,
+            player: { x: 1, y: 1, range: 1, lives: 2, maxBombs: 1, activeBombs: 0, hasKey: false },
+            enemies: [],
+            bombs: [],
+            isOver: false,
+            isPaused: false
+        };
+        
+        // INPUT STATE
+        let activeInput = { key: null, isDown: false, lastMoveTime: 0 };
+
+        let gameLoopId;
+        let animationFrameId;
+
+        /* --- DOM --- */
+        const boardEl = document.getElementById('game-board');
+        const levelEl = document.getElementById('level-el');
+        const livesEl = document.getElementById('lives-el');
+        const keyEl = document.getElementById('key-el');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayMsg = document.getElementById('overlay-msg');
+        const overlayBtn = document.getElementById('overlay-btn');
+        const overlayAi = document.getElementById('overlay-ai-comment');
+
+        /* --- GAME LIFECYCLE --- */
+        function startGame(reset = false) {
+            if (reset) {
+                gameState.level = 1;
+                gameState.player = { x: 1, y: 1, range: 1, lives: 3, maxBombs: 1, activeBombs: 0, hasKey: false };
+            } else {
+                gameState.player.x = 1;
+                gameState.player.y = 1;
+                gameState.player.activeBombs = 0;
+                gameState.player.hasKey = false;
+            }
+            
+            gameState.enemies = [];
+            gameState.bombs = [];
+            gameState.isOver = false;
+            gameState.isPaused = false;
+            
+            activeInput.key = null;
+            activeInput.isDown = false;
+
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
+            
+            initLevel();
+        }
+
+        function initLevel() {
+            clearInterval(gameLoopId);
+            cancelAnimationFrame(animationFrameId);
+            
+            generateMap(); // Standard gen first
+            spawnEnemies(Math.min(gameState.level + 1, 8));
+            
+            // AI: Generate Name automatically
+            generateLevelName();
+
+            gameLoopId = setInterval(gameTick, 50);
+            requestAnimationFrame(renderLoop);
+            updateUI();
+        }
+
+        function gameTick() {
+            if (gameState.isOver || gameState.isPaused) return;
+            processInput();
+            
+            const now = Date.now();
+            if (!gameState.lastEnemyMove || now - gameState.lastEnemyMove > Math.max(300, 800 - (gameState.level * 40))) {
+                moveEnemies();
+                gameState.lastEnemyMove = now;
+            }
+            checkCollisions();
+        }
+
+        function renderLoop() {
+            render();
+            animationFrameId = requestAnimationFrame(renderLoop);
+        }
+
+        /* --- INPUT --- */
+        function processInput() {
+            if (!activeInput.isDown || !activeInput.key) return;
+            const now = Date.now();
+            if (now - activeInput.lastMoveTime < PLAYER_SPEED_MS) return;
+
+            let dx = 0, dy = 0;
+            const key = activeInput.key;
+            if (key === 'ArrowUp') dy = -1;
+            else if (key === 'ArrowDown') dy = 1;
+            else if (key === 'ArrowLeft') dx = -1;
+            else if (key === 'ArrowRight') dx = 1;
+
+            if (dx !== 0 || dy !== 0) {
+                movePlayer(dx, dy);
+                activeInput.lastMoveTime = now;
+            }
+        }
+
+        function setInput(key, isDown) {
+            if (key === 'Space') {
+                if (isDown && !gameState.isOver && !gameState.isPaused) placeBomb();
+                return;
+            }
+            if (isDown) {
+                activeInput.key = key;
+                activeInput.isDown = true;
+            } else {
+                if (activeInput.key === key) {
+                    activeInput.isDown = false;
+                    activeInput.key = null;
+                }
+            }
+        }
+
+        /* --- MAP LOGIC --- */
+        function generateMap(customGrid = null) {
+            boardEl.innerHTML = '';
+            board = [];
+            hiddenItems = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(null));
+            let softWallCoords = [];
+
+            if (customGrid) {
+                // Use AI provided grid
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const row = [];
+                    for (let x = 0; x < GRID_SIZE; x++) {
+                        const char = customGrid[y][x];
+                        if (char === '#') row.push(SPRITES.HARD_WALL);
+                        else if (char === 'T') {
+                            row.push(SPRITES.SOFT_WALL);
+                            softWallCoords.push({x, y});
+                        }
+                        else row.push(SPRITES.EMPTY);
+                    }
+                    board.push(row);
+                }
+            } else {
+                // Standard Procedural Generation
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const row = [];
+                    for (let x = 0; x < GRID_SIZE; x++) {
+                        if (x === 0 || x === GRID_SIZE - 1 || y === 0 || y === GRID_SIZE - 1 || (x % 2 === 0 && y % 2 === 0)) {
+                            row.push(SPRITES.HARD_WALL);
+                        } else {
+                            if ((x < 3 && y < 3)) {
+                                row.push(SPRITES.EMPTY);
+                            } else {
+                                if (Math.random() < SOFT_WALL_DENSITY) {
+                                    row.push(SPRITES.SOFT_WALL);
+                                    softWallCoords.push({x, y});
+                                } else {
+                                    row.push(SPRITES.EMPTY);
+                                }
+                            }
+                        }
+                    }
+                    board.push(row);
+                }
+            }
+
+            // Place Items
+            softWallCoords.sort(() => Math.random() - 0.5);
+            const place = (item) => { if(softWallCoords.length > 0) hiddenItems[softWallCoords.pop().y][softWallCoords.pop().x] = item; }; // Simplified pop usage logic might be buggy if same obj used, assuming coords are unique objects. 
+            // Actually correct: pop returns {x,y}, access hiddenItems.
+            const placeItem = (item) => {
+                if (softWallCoords.length > 0) {
+                    const p = softWallCoords.pop();
+                    hiddenItems[p.y][p.x] = item;
+                }
+            };
+
+            placeItem(SPRITES.DOOR);
+            placeItem(SPRITES.KEY);
+            placeItem(SPRITES.RANGE_UP);
+            if (Math.random() > 0.5) placeItem(SPRITES.EXTRA_LIFE);
+
+            // DOM Init
+            board.forEach((row, y) => {
+                row.forEach((c, x) => {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.id = `c-${x}-${y}`;
+                    if (c === SPRITES.HARD_WALL) cell.style.backgroundColor = 'rgba(0,0,0,0.2)';
+                    else if (c === SPRITES.SOFT_WALL) cell.style.backgroundColor = 'rgba(0,0,0,0.1)';
+                    boardEl.appendChild(cell);
+                });
+            });
+            
+            // Force player safe zone if AI made walls there
+            board[1][1] = SPRITES.EMPTY;
+            board[1][2] = SPRITES.EMPTY;
+            board[2][1] = SPRITES.EMPTY;
+        }
+
+        function spawnEnemies(count) {
+            gameState.enemies = [];
+            let spawned = 0, attempts = 0;
+            while (spawned < count && attempts < 200) {
+                attempts++;
+                const x = Math.floor(Math.random() * GRID_SIZE);
+                const y = Math.floor(Math.random() * GRID_SIZE);
+                if (board[y][x] === SPRITES.EMPTY && (x > 4 || y > 4)) {
+                    gameState.enemies.push({ x, y });
+                    spawned++;
+                }
+            }
+        }
+
+        /* --- GAME ACTIONS --- */
+        function movePlayer(dx, dy) {
+            const nx = gameState.player.x + dx;
+            const ny = gameState.player.y + dy;
+            const tile = board[ny][nx];
+            
+            if (tile === SPRITES.HARD_WALL || tile === SPRITES.SOFT_WALL) return;
+            if (gameState.bombs.some(b => b.x === nx && b.y === ny)) return;
+
+            gameState.player.x = nx;
+            gameState.player.y = ny;
+
+            if (tile === SPRITES.RANGE_UP) { gameState.player.range++; board[ny][nx] = SPRITES.EMPTY; showToast("⚡ Радиус++"); }
+            else if (tile === SPRITES.EXTRA_LIFE) { gameState.player.lives++; board[ny][nx] = SPRITES.EMPTY; showToast("❤️ Жизнь++"); }
+            else if (tile === SPRITES.KEY) { gameState.player.hasKey = true; board[ny][nx] = SPRITES.EMPTY; showToast("🔑 Ключ!"); }
+            else if (tile === SPRITES.DOOR) checkLevelComplete();
+            updateUI();
+        }
+
+        function moveEnemies() {
+            gameState.enemies.forEach(enemy => {
+                const dirs = [{x:0,y:-1}, {x:0,y:1}, {x:-1,y:0}, {x:1,y:0}];
+                const validMoves = dirs.filter(d => {
+                    const tx = enemy.x + d.x, ty = enemy.y + d.y;
+                    const tTile = board[ty][tx];
+                    const passable = tTile === SPRITES.EMPTY || tTile === SPRITES.KEY || tTile === SPRITES.RANGE_UP || tTile === SPRITES.EXTRA_LIFE;
+                    const tBomb = gameState.bombs.find(b => b.x === tx && b.y === ty);
+                    return passable && !tBomb;
+                });
+                if (validMoves.length > 0) {
+                    const m = validMoves[Math.floor(Math.random() * validMoves.length)];
+                    enemy.x += m.x;
+                    enemy.y += m.y;
+                }
+            });
+        }
+
+        function placeBomb() {
+            if (gameState.player.activeBombs >= gameState.player.maxBombs) return;
+            if (gameState.bombs.some(b => b.x === gameState.player.x && b.y === gameState.player.y)) return;
+            
+            const bomb = { x: gameState.player.x, y: gameState.player.y, range: gameState.player.range };
+            gameState.bombs.push(bomb);
+            gameState.player.activeBombs++;
+            render();
+            setTimeout(() => explode(bomb), 2000);
+        }
+
+        function explode(bomb) {
+            if (gameState.isOver) return;
+            gameState.bombs = gameState.bombs.filter(b => b !== bomb);
+            gameState.player.activeBombs--;
+            
+            let hitCells = [{x: bomb.x, y: bomb.y}];
+            const dirs = [{x:0,y:-1}, {x:0,y:1}, {x:-1,y:0}, {x:1,y:0}];
+
+            dirs.forEach(d => {
+                for(let i=1; i<=bomb.range; i++) {
+                    const tx = bomb.x + d.x * i, ty = bomb.y + d.y * i;
+                    if (tx<0||tx>=GRID_SIZE||ty<0||ty>=GRID_SIZE) break;
+                    const tile = board[ty][tx];
+                    if (tile === SPRITES.HARD_WALL) break;
+                    hitCells.push({x: tx, y: ty});
+                    if (tile === SPRITES.SOFT_WALL) {
+                        const hidden = hiddenItems[ty][tx];
+                        board[ty][tx] = hidden ? hidden : SPRITES.EMPTY;
+                        hiddenItems[ty][tx] = null;
+                        break;
+                    }
+                    if (tile === SPRITES.DOOR || tile === SPRITES.KEY) break;
+                }
+            });
+
+            hitCells.forEach(pos => {
+                const cell = document.getElementById(`c-${pos.x}-${pos.y}`);
+                if(cell) {
+                    cell.classList.add('explosion');
+                    setTimeout(() => cell.classList.remove('explosion'), 500);
+                }
+                if (pos.x === gameState.player.x && pos.y === gameState.player.y) takeDamage("blown_up");
+                gameState.enemies = gameState.enemies.filter(e => !(e.x === pos.x && e.y === pos.y));
+            });
+        }
+
+        function takeDamage(cause) {
+            if (gameState.isOver) return;
+            gameState.player.lives--;
+            updateUI();
+            if (gameState.player.lives <= 0) showGameOver(false, cause);
+            else showToast("💔 Ранен!");
+        }
+
+        function checkCollisions() {
+            if (gameState.enemies.some(e => e.x === gameState.player.x && e.y === gameState.player.y)) takeDamage("eaten");
+        }
+
+        function checkLevelComplete() {
+            if (gameState.enemies.length > 0) { showToast("Враги живы!"); return; }
+            if (!gameState.player.hasKey) { showToast("Нужен ключ!"); return; }
+            showLevelComplete();
+        }
+
+        /* --- UI & GEMINI API --- */
+        const apiKey = ""; // Key injected by environment
+
+        async function generateLevelName() {
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: `Придумай название уровня подземелья для игры. 2-3 слова на русском. Эпично или смешно.` }] }] })
+                });
+                const d = await res.json();
+                const text = d.candidates?.[0]?.content?.parts?.[0]?.text || `Уровень ${gameState.level}`;
+                showToast(`🏰 ${text}`);
+            } catch(e) {}
+        }
+
+        async function generateGameOverComment(win, cause) {
+            overlayAi.innerHTML = '<div class="spinner"></div>';
+            const prompt = win ? "Похвали игрока за победу в Бомбермен (1 фраза, русский)." : `Игрок проиграл (${cause}). Пошути над ним (1 фраза, русский).`;
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const d = await res.json();
+                overlayAi.textContent = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            } catch(e) { overlayAi.textContent = ""; }
+        }
+
+        async function generateTheme() {
+            showToast("🎨 Генерирую тему...");
+            const prompt = `JSON для игры. Keys: EMPTY, HARD_WALL, SOFT_WALL, PLAYER, ENEMY, BOMB, RANGE_UP, EXTRA_LIFE, KEY, DOOR, DEAD. Values: 1 emoji each. Theme: Random (Candy, Horror, Space, Underwater). Only JSON.`;
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const d = await res.json();
+                let t = d.candidates?.[0]?.content?.parts?.[0]?.text.replace(/```json/g,'').replace(/```/g,'');
+                SPRITES = { ...SPRITES, ...JSON.parse(t) };
+                generateMap(); // Refresh visuals only? No, map logic relies on types, visuals rely on SPRITES. But hard walls might need refresh.
+                // Re-rendering board DOM is safer
+                boardEl.innerHTML = '';
+                // Re-render utilizing existing board state logic
+                board.forEach((row, y) => {
+                    row.forEach((c, x) => {
+                        const cell = document.createElement('div');
+                        cell.className = 'cell';
+                        cell.id = `c-${x}-${y}`;
+                        if (c === SPRITES.HARD_WALL) cell.style.backgroundColor = 'rgba(0,0,0,0.2)';
+                        else if (c === SPRITES.SOFT_WALL) cell.style.backgroundColor = 'rgba(0,0,0,0.1)';
+                        boardEl.appendChild(cell);
+                    });
+                });
+                showToast("Тема обновлена!");
+            } catch(e) { showToast("Ошибка темы"); }
+        }
+
+        async function generateAIMap() {
+            showToast("🏗️ ИИ строит карту...");
+            const prompt = `Generate a 13x13 grid for a Bomberman level. Use characters: '#' for hard indestructible wall, 'T' for soft destructible tree/wall, '.' for empty space. Make it a coherent maze or pattern. Return ONLY the 13 lines of characters.`;
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const d = await res.json();
+                let text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+                // Parse text into grid
+                const lines = text.trim().split('\n').filter(l => l.length >= 13).slice(0, 13);
+                if (lines.length === 13) {
+                    generateMap(lines);
+                    spawnEnemies(5); // Respawn enemies on new map
+                    showToast("Карта построена!");
+                } else {
+                    throw new Error("Invalid format");
+                }
+            } catch(e) { showToast("ИИ ошибся, строю обычную..."); generateMap(); }
+        }
+
+        function showLevelComplete() {
+            gameState.isPaused = true;
+            overlayTitle.textContent = "ПОБЕДА!";
+            overlayTitle.className = "pixel-font text-2xl text-green-400 mb-4";
+            overlayMsg.textContent = "Уровень зачищен.";
+            overlayBtn.textContent = "ДАЛЬШЕ";
+            overlayBtn.onclick = () => { gameState.level++; startGame(false); };
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+            generateGameOverComment(true);
+        }
+
+        function showGameOver(win, cause) {
+            gameState.isOver = true;
+            overlayTitle.textContent = "GAME OVER";
+            overlayTitle.className = "pixel-font text-3xl text-red-500 mb-4";
+            overlayMsg.textContent = `Уровень: ${gameState.level}`;
+            overlayBtn.textContent = "ЗАНОВО";
+            overlayBtn.onclick = () => startGame(true);
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+            generateGameOverComment(false, cause);
+        }
+
+        function render() {
+            let dangerSet = new Set();
+            gameState.bombs.forEach(b => {
+                dangerSet.add(`${b.x},${b.y}`);
+                [{x:0,y:-1},{x:0,y:1},{x:-1,y:0},{x:1,y:0}].forEach(d=>{
+                    for(let i=1; i<=b.range; i++){
+                        const tx=b.x+d.x*i, ty=b.y+d.y*i;
+                        if(tx<0||tx>=GRID_SIZE||ty<0||ty>=GRID_SIZE) break;
+                        if(board[ty][tx]===SPRITES.HARD_WALL) break;
+                        dangerSet.add(`${tx},${ty}`);
+                        if(board[ty][tx]===SPRITES.SOFT_WALL) break;
+                    }
+                });
+            });
+
+            for(let y=0; y<GRID_SIZE; y++) {
+                for(let x=0; x<GRID_SIZE; x++) {
+                    const cell = document.getElementById(`c-${x}-${y}`);
+                    if(!cell) continue;
+                    
+                    let content = board[y][x];
+                    let className = 'cell';
+                    if(dangerSet.has(`${x},${y}`)) className += ' danger-zone';
+
+                    const bomb = gameState.bombs.find(b=>b.x===x && b.y===y);
+                    const enemy = gameState.enemies.find(e=>e.x===x && e.y===y);
+                    const isPlayer = (gameState.player.x===x && gameState.player.y===y);
+
+                    if(isPlayer) { content = gameState.player.lives>0 ? SPRITES.PLAYER : SPRITES.DEAD; className += ' player'; }
+                    else if(enemy) { content = SPRITES.ENEMY; className += ' enemy'; }
+                    else if(bomb) { content = SPRITES.BOMB; className += ' bomb'; }
+                    else if([SPRITES.KEY, SPRITES.DOOR, SPRITES.RANGE_UP, SPRITES.EXTRA_LIFE].includes(content)) className += ' item';
+
+                    if (cell.textContent !== content) cell.textContent = content;
+                    if (cell.className !== className) cell.className = className;
+                }
+            }
+        }
+
+        function updateUI() {
+            levelEl.textContent = gameState.level;
+            livesEl.textContent = gameState.player.lives;
+            keyEl.textContent = gameState.player.hasKey ? "✅" : "❌";
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-msg').textContent = msg;
+            t.classList.remove('opacity-0', 'pointer-events-none');
+            setTimeout(() => t.classList.add('opacity-0', 'pointer-events-none'), 2000);
+        }
+
+        // Listeners
+        document.querySelectorAll('.btn-control').forEach(btn => {
+            const key = btn.dataset.key;
+            const press = (e) => { e.preventDefault(); setInput(key, true); btn.classList.add('pressed'); if(navigator.vibrate) navigator.vibrate(5); };
+            const release = (e) => { e.preventDefault(); setInput(key, false); btn.classList.remove('pressed'); };
+            
+            btn.addEventListener('touchstart', press, {passive: false});
+            btn.addEventListener('touchend', release);
+            btn.addEventListener('mousedown', press);
+            btn.addEventListener('mouseup', release);
+            btn.addEventListener('mouseleave', release);
+        });
+        
+        window.addEventListener('touchend', () => { /* Global release safety */ });
+        
+        window.addEventListener('keydown', e => {
+            const m = {'ArrowUp':'ArrowUp','w':'ArrowUp','ArrowDown':'ArrowDown','s':'ArrowDown','ArrowLeft':'ArrowLeft','a':'ArrowLeft','ArrowRight':'ArrowRight','d':'ArrowRight',' ':'Space','Enter':'Space'};
+            if(m[e.key] && !e.repeat) setInput(m[e.key], true);
+        });
+        window.addEventListener('keyup', e => {
+            const m = {'ArrowUp':'ArrowUp','w':'ArrowUp','ArrowDown':'ArrowDown','s':'ArrowDown','ArrowLeft':'ArrowLeft','a':'ArrowLeft','ArrowRight':'ArrowRight','d':'ArrowRight',' ':'Space','Enter':'Space'};
+            if(m[e.key]) setInput(m[e.key], false);
+        });
+
+        document.getElementById('ai-btn').addEventListener('click', async () => {
+            showToast("🤖...");
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: `Совет Бомбермен. Ур: ${gameState.level}. 1 фраза рус.` }] }] })
+                });
+                const d = await res.json();
+                showToast("🤖 " + (d.candidates?.[0]?.content?.parts?.[0]?.text || "Беги!"));
+            } catch(e) {}
+        });
+
+        document.getElementById('ai-theme-btn').addEventListener('click', generateTheme);
+        document.getElementById('ai-map-btn').addEventListener('click', generateAIMap);
+
+        startGame(true);
+    </script>
+</body>
+</html>
