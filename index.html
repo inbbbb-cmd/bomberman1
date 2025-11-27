@@ -251,19 +251,14 @@
     </div>
 
     <script>
-        /* --- TELEGRAM INIT --- */
+        /* --- TELEGRAM INIT (УПРОЩЁННЫЙ, КАК В САПЁРЕ) --- */
         let tg = null;
+
         try {
             if (window.Telegram && window.Telegram.WebApp) {
-                const wa = window.Telegram.WebApp;
-                // считаем реальным WebApp только если есть initData/initDataUnsafe
-                const hasInitData = (wa.initData && wa.initData.length > 0) ||
-                                    (wa.initDataUnsafe && Object.keys(wa.initDataUnsafe).length > 0);
-                if (hasInitData) {
-                    tg = wa;
-                    tg.expand();
-                    tg.ready();
-                }
+                tg = window.Telegram.WebApp;
+                tg.expand();
+                tg.ready();
             }
         } catch (e) {
             tg = null;
