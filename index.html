@@ -144,6 +144,22 @@
             font-family: 'Press Start 2P', cursive;
             z-index: 100;
         }
+
+        /* Бейдж режима (Telegram / Standalone) */
+        #mode-badge {
+            position: absolute;
+            bottom: 5px;
+            left: 8px;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.8);
+            color: #e5e7eb;
+            font-family: 'Roboto', sans-serif;
+            z-index: 100;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -200,6 +216,9 @@
                     ДАЛЕЕ
                 </button>
             </div>
+
+            <!-- Badge режима -->
+            <div id="mode-badge">Standalone</div>
         </div>
     </main>
 
@@ -224,7 +243,7 @@
             </div>
         </div>
         <!-- НОМЕР ВЕРСИИ -->
-        <div id="version-tag">v1.4</div>
+        <div id="version-tag">v1.5</div>
     </footer>
 
     <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 bg-slate-800 border border-yellow-500 text-yellow-100 px-4 py-2 rounded-lg shadow-2xl opacity-0 pointer-events-none text-xs sm:text-sm text-center w-max max-w-[90%]">
@@ -239,11 +258,19 @@
             tg.ready();
         }
 
+        // Плашка режима (Telegram / Standalone)
+        const modeBadge = document.getElementById('mode-badge');
+        if (tg) {
+            modeBadge.textContent = 'Telegram · рейтинг @Games_trivia_bot';
+        } else {
+            modeBadge.textContent = 'Standalone · без рейтинга';
+        }
+
         /* --- CONSTANTS --- */
         const GRID_SIZE = 13;
         const SOFT_WALL_DENSITY = 0.45;
         const PLAYER_SPEED_MS = 160;
-        const apiKey = ""; // API Key injected by environment
+        const apiKey = ""; // API Key для Gemini, если нужен
         
         /* --- ASSETS (Default) --- */
         let SPRITES = {
@@ -330,13 +357,11 @@
         }
 
         function initLevel(customGrid = null) {
-            clearInterval(gameLoopId);
-            cancelAnimationFrame(animationFrameId);
+            if (gameLoopId) clearInterval(gameLoopId);
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
             
-            generateMap(customGrid); // Standard gen first
+            generateMap(customGrid);
             spawnEnemies(Math.min(gameState.level + 1, 8));
-            
-            // AI: Generate Name automatically
             generateLevelBriefing();
 
             gameLoopId = setInterval(gameTick, 50);
@@ -638,7 +663,6 @@
 
         /* --- UI & GEMINI API --- */
 
-        // Helper: Serialize board for AI
         function getBoardString() {
             let s = "";
             for(let y=0; y<GRID_SIZE; y++) {
@@ -646,7 +670,7 @@
                     if (gameState.player.x === x && gameState.player.y === y) s += "P";
                     else if (gameState.enemies.some(e => e.x === x && e.y === y)) s += "E";
                     else if (board[y][x] === SPRITES.HARD_WALL) s += "#";
-                    else if (board[y][x] === SPRITES.SOFT_WALL) s += "W"; // Wall destructible
+                    else if (board[y][x] === SPRITES.SOFT_WALL) s += "W";
                     else s += ".";
                 }
                 s += "\n";
@@ -655,7 +679,7 @@
         }
 
         async function generateLevelBriefing() {
-            // Не блокируем старт уровня, просто выводим тост
+            if (!apiKey) return; // без ключа просто молчим
             try {
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -668,6 +692,7 @@
         }
 
         async function generateGameOverComment(win, cause) {
+            if (!apiKey) { overlayAi.textContent = ""; return; }
             overlayAi.innerHTML = '<div class="spinner"></div>';
             const prompt = win
                 ? "Похвали игрока за победу в Бомбермен (1 фраза, русский)."
@@ -683,6 +708,7 @@
         }
 
         async function generateTheme() {
+            if (!apiKey) { showToast("Нет API ключа для темы"); return; }
             showToast("🎨 Генерирую тему...");
             const prompt = `JSON для игры. Keys: EMPTY, HARD_WALL, SOFT_WALL, PLAYER, ENEMY, BOMB, RANGE_UP, EXTRA_LIFE, KEY, DOOR, DEAD, EXTRA_BOMB. Values: 1 emoji each. Theme: Random (Candy, Horror, Space, Underwater, Matrix, Food). Only JSON.`;
             try {
@@ -699,6 +725,7 @@
         }
 
         async function generateAIMap() {
+            if (!apiKey) { showToast("Нет API ключа для карты"); return; }
             showToast("🏗️ ИИ строит карту...");
             const prompt = `Generate a 13x13 grid for a Bomberman level. Use characters: '#' for hard indestructible wall, 'T' for soft destructible tree/wall, '.' for empty space. Make it a coherent maze or pattern. Return ONLY the 13 lines of characters.`;
             try {
@@ -707,11 +734,10 @@
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
                 const d = await res.json();
-                let text = d.candidates?.[0]?.content?.parts?.[0]?.text;
-                const lines = text.trim().split('\n').filter(l => l.length >= 13).slice(0, 13);
+                let text = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                const lines = text.trim().split('\n').filter(l => l.trim().length >= 13).slice(0, 13);
                 if (lines.length === 13) {
                     initLevel(lines);
-                    spawnEnemies(5);
                     showToast("Карта построена!");
                 } else {
                     throw new Error("Invalid format");
@@ -720,6 +746,7 @@
         }
         
         async function getContextualAdvice() {
+            if (!apiKey) { showToast("💡 Совет недоступен (нет API ключа)"); return; }
             showToast("🧠 Анализирую ситуацию...");
             const gridStr = getBoardString();
             const prompt = `You are a tactical advisor for Bomberman. Here is the current 13x13 grid:\n${gridStr}\nLegend: P=Player, E=Enemy, #=Hard Wall, W=Soft Wall, .=Empty.\nGive 1 short sentence of advice (in Russian) to the player based on their immediate surroundings (enemies nearby? trapped?). Keep it urgent.`;
@@ -742,7 +769,7 @@
             gameState.isPaused = true;
 
             const levelTimeSec = Math.floor((Date.now() - gameState.levelStartTime) / 1000);
-            const timeBonus = Math.max(20, 200 - levelTimeSec);   // чем быстрее — тем больше
+            const timeBonus = Math.max(20, 200 - levelTimeSec);
             gameState.score += timeBonus;
             gameState.stats.levelsCompleted++;
             updateUI();
@@ -778,19 +805,23 @@
         }
 
         function sendScoreToTelegram(win, cause) {
-            if (!tg || !tg.sendData) return;
+            if (!tg || !tg.sendData) {
+                console.log('Not in Telegram WebApp, score not sent');
+                showToast("Чтобы попасть в рейтинг, играй через бота @Games_trivia_bot");
+                return;
+            }
             try {
                 const payload = buildScorePayload(win, cause);
                 tg.sendData(JSON.stringify(payload));
+                showToast("Результат отправлен в @Games_trivia_bot");
             } catch (e) {
                 console.error('Telegram sendData error', e);
+                showToast("Не удалось отправить результат в бота");
             }
         }
 
         function showGameOver(win, cause) {
             gameState.isOver = true;
-            
-            // --- TELEGRAM: отправляем результат игры в бота ---
             sendScoreToTelegram(win, cause);
 
             overlayTitle.textContent = "GAME OVER";
@@ -885,6 +916,13 @@
         document.getElementById('ai-btn').addEventListener('click', getContextualAdvice);
         document.getElementById('ai-theme-btn').addEventListener('click', generateTheme);
         document.getElementById('ai-map-btn').addEventListener('click', generateAIMap);
+
+        // Если запущено не из Telegram — подсказка про рейтинг
+        if (!tg) {
+            setTimeout(() => {
+                showToast("Для участия в рейтинге открой игру через бота @Games_trivia_bot");
+            }, 1000);
+        }
 
         // START
         startGame(true);
