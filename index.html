@@ -243,7 +243,7 @@
             </div>
         </div>
         <!-- НОМЕР ВЕРСИИ -->
-        <div id="version-tag">v1.5</div>
+        <div id="version-tag">v1.6</div>
     </footer>
 
     <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 bg-slate-800 border border-yellow-500 text-yellow-100 px-4 py-2 rounded-lg shadow-2xl opacity-0 pointer-events-none text-xs sm:text-sm text-center w-max max-w-[90%]">
@@ -251,14 +251,24 @@
     </div>
 
     <script>
-        // --- TELEGRAM INIT ---
-        const tg = window.Telegram?.WebApp || null;
-        if (tg) {
-            tg.expand();
-            tg.ready();
+        /* --- TELEGRAM INIT --- */
+        let tg = null;
+        try {
+            if (window.Telegram && window.Telegram.WebApp) {
+                const wa = window.Telegram.WebApp;
+                // считаем реальным WebApp только если есть initData/initDataUnsafe
+                const hasInitData = (wa.initData && wa.initData.length > 0) ||
+                                    (wa.initDataUnsafe && Object.keys(wa.initDataUnsafe).length > 0);
+                if (hasInitData) {
+                    tg = wa;
+                    tg.expand();
+                    tg.ready();
+                }
+            }
+        } catch (e) {
+            tg = null;
         }
 
-        // Плашка режима (Telegram / Standalone)
         const modeBadge = document.getElementById('mode-badge');
         if (tg) {
             modeBadge.textContent = 'Telegram · рейтинг @Games_trivia_bot';
@@ -271,6 +281,9 @@
         const SOFT_WALL_DENSITY = 0.45;
         const PLAYER_SPEED_MS = 160;
         const apiKey = ""; // API Key для Gemini, если нужен
+
+        const GAME_ID = "bomberman_ai_architect";
+        const GAME_NAME = "Бомбермен: AI Архитектор";
         
         /* --- ASSETS (Default) --- */
         let SPRITES = {
@@ -742,7 +755,7 @@
                 } else {
                     throw new Error("Invalid format");
                 }
-            } catch(e) { showToast("ИИ ошибся, строю обычную..."); initLevel(); }
+            } catch(e) { showToast("ИЕ ошибся, строю обычную..."); initLevel(); }
         }
         
         async function getContextualAdvice() {
@@ -784,22 +797,19 @@
             generateGameOverComment(true);
         }
 
+        /* --- ОТПРАВКА РЕЗУЛЬТАТА В БОТА --- */
         function buildScorePayload(win, cause) {
-            const user = tg?.initDataUnsafe?.user;
-            const fullName = user ? [user.first_name, user.last_name].filter(Boolean).join(' ') : "Player";
-
             return {
-                action: 'save_score',
-                game: 'bomber',
-                run_id: gameState.runId,
-                telegram_id: user?.id || null,
-                username: user?.username || null,
-                name: fullName,
-                level: gameState.level,
+                action: "save_score",
+                game_id: GAME_ID,
+                game_name: GAME_NAME,
                 score: gameState.score,
+                // Доп. поля — бот их может игнорировать или логировать
+                level: gameState.level,
                 win,
                 cause,
                 stats: gameState.stats,
+                run_id: gameState.runId,
                 timestamp: Date.now()
             };
         }
@@ -834,6 +844,7 @@
             generateGameOverComment(false, cause);
         }
 
+        /* --- РЕНДЕР И UI --- */
         function render() {
             let dangerSet = new Set();
             gameState.bombs.forEach(b => {
@@ -888,7 +899,7 @@
             setTimeout(() => t.classList.add('opacity-0', 'pointer-events-none'), 3000);
         }
 
-        // Listeners
+        /* --- LISTENERS --- */
         document.querySelectorAll('.btn-control').forEach(btn => {
             const key = btn.dataset.key;
             const press = (e) => { e.preventDefault(); setInput(key, true); btn.classList.add('pressed'); if(navigator.vibrate) navigator.vibrate(5); };
@@ -912,7 +923,6 @@
             if(m[e.key]) setInput(m[e.key], false);
         });
 
-        // AI buttons
         document.getElementById('ai-btn').addEventListener('click', getContextualAdvice);
         document.getElementById('ai-theme-btn').addEventListener('click', generateTheme);
         document.getElementById('ai-map-btn').addEventListener('click', generateAIMap);
